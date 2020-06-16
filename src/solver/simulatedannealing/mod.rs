@@ -233,10 +233,11 @@ where
     const NAME: &'static str = "Simulated Annealing";
     fn init(
         &mut self,
-        _op: &mut OpWrapper<O>,
-        _state: &IterState<O>,
+        op: &mut OpWrapper<O>,
+        state: &IterState<O>,
     ) -> Result<Option<ArgminIterData<O>>, Error> {
-        Ok(Some(ArgminIterData::new().kv(make_kv!(
+        let cost = op.apply(&state.get_param())?;
+        Ok(Some(ArgminIterData::new().cost(cost).kv(make_kv!(
             "initial_temperature" => self.init_temp;
             "stall_iter_accepted_limit" => self.stall_iter_accepted_limit;
             "stall_iter_best_limit" => self.stall_iter_best_limit;
