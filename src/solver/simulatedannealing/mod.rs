@@ -237,7 +237,7 @@ where
         state: &IterState<O>,
     ) -> Result<Option<ArgminIterData<O>>, Error> {
         let cost = op.apply(&state.get_param())?;
-        Ok(Some(ArgminIterData::new().cost(cost).kv(make_kv!(
+        Ok(Some(ArgminIterData::new().param(state.get_param()).cost(cost).kv(make_kv!(
             "initial_temperature" => self.init_temp;
             "stall_iter_accepted_limit" => self.stall_iter_accepted_limit;
             "stall_iter_best_limit" => self.stall_iter_best_limit;
@@ -280,10 +280,10 @@ where
         // which will always be between 0 and 0.5.
         let prob: f64 = self.rng.gen();
         let prob = F::from_f64(prob).unwrap();
-        let accepted = (new_cost < state.get_prev_cost())
+        let accepted = (new_cost < prev_cost)
             || (F::from_f64(1.0).unwrap()
                 / (F::from_f64(1.0).unwrap()
-                    + ((new_cost - state.get_prev_cost()) / self.cur_temp).exp())
+                    + ((new_cost - prev_cost) / self.cur_temp).exp())
                 > prob);
 
         // Update stall iter variables

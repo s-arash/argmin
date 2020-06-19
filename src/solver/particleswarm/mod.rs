@@ -34,6 +34,9 @@ pub struct ParticleSwarm<P, F> {
 
     search_region: (P, P),
     num_particles: usize,
+
+    reset_velocities_best: u64,
+    supplied_solutions: Vec<P>
 }
 
 impl<P, F> ParticleSwarm<P, F>
@@ -67,18 +70,47 @@ where
             weight_swarm,
             search_region,
             num_particles,
+            reset_velocities_best: u64::max_value(),
+            supplied_solutions: vec![],
         };
 
         Ok(particle_swarm)
+    }
+
+    /// reset particle velocities after no best solution has been found after `iter` iterations
+    pub fn reset_velocities_best(mut self, iter: u64) -> Self {
+        self.reset_velocities_best = iter;
+        self
+    }
+
+    /// provide solutions to use as initial particle positions
+    pub fn supplied_solutions(mut self, solutions: Vec<P>) -> Self {
+        self.supplied_solutions = solutions;
+        self
     }
 
     fn initialize_particles<O: ArgminOp<Param = P, Output = F, Float = F>>(
         &mut self,
         op: &mut OpWrapper<O>,
     ) {
-        self.particles = (0..self.num_particles)
-            .map(|_| self.initialize_particle(op))
-            .collect();
+        self.particles = Vec::with_capacity(self.num_particles);
+        for i in 0..self.num_particles {
+            let particle = if i < self.supplied_solutions.len() {
+                let position = self.supplied_solutions[i].clone();
+                let cost = op.apply(&position).unwrap();
+
+                Particle {
+                    position : position.clone(),
+                    cost : cost,
+                    best_position: position.clone(),
+                    best_cost : cost,
+                    velocity: self.get_random_velocity::<O>(),
+                }
+            } else {
+                self.initialize_particle(op)
+            };
+            self.particles.push(particle);
+        }
 
         self.best_position = self.get_best_position();
         self.best_cost = op.apply(&self.best_position).unwrap();
@@ -90,18 +122,29 @@ where
         op: &mut OpWrapper<O>,
     ) -> Particle<P, F> {
         let (min, max) = &self.search_region;
-        let delta = max.sub(min);
-        let delta_neg = delta.mul(&F::from_f64(-1.0).unwrap());
 
         let initial_position = O::Param::rand_from_range(min, max);
         let initial_cost = op.apply(&initial_position).unwrap(); // FIXME do not unwrap
 
         Particle {
             position: initial_position.clone(),
-            velocity: O::Param::rand_from_range(&delta_neg, &delta),
+            velocity: self.get_random_velocity::<O>(),
             cost: initial_cost,
             best_position: initial_position,
             best_cost: initial_cost,
+        }
+    }
+
+    fn get_random_velocity<O: ArgminOp<Param = P, Output = F, Float = F>>(&self) -> P {
+        let (min, max) = &self.search_region;
+        let delta = max.sub(min).mul(&F::from_f64(0.2).unwrap());
+        let delta_neg = delta.mul(&F::from_f64(-1.0).unwrap());
+        O::Param::rand_from_range(&delta_neg, &delta)
+    }
+
+    fn reset_velocities<O: ArgminOp<Param = P, Output = F, Float = F>>(&mut self) {
+        for i in 0..self.particles.len() {
+            self.particles[i].velocity = self.get_random_velocity::<O>();
         }
     }
 
@@ -149,10 +192,13 @@ where
     fn next_iter(
         &mut self,
         _op: &mut OpWrapper<O>,
-        _state: &IterState<O>,
+        state: &IterState<O>,
     ) -> Result<ArgminIterData<O>, Error> {
         let zero = O::Param::zero_like(&self.best_position);
 
+        if state.iter - state.last_best_iter > self.reset_velocities_best {
+            self.reset_velocities::<O>();
+        }
         for p in self.particles.iter_mut() {
             // New velocity is composed of
             // 1) previous velocity (momentum),
